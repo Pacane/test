@@ -96,9 +96,15 @@ void main() {
   });
 
   group("runs successful tests", () {
-    test("on the browser only", () {
+    test("on Chrome", () {
       new File(p.join(_sandbox, "test.dart")).writeAsStringSync(_success);
       var result = _runUnittest(["-p", "chrome", "test.dart"]);
+      expect(result.exitCode, equals(0));
+    });
+
+    test("on Firefox", () {
+      new File(p.join(_sandbox, "test.dart")).writeAsStringSync(_success);
+      var result = _runUnittest(["-p", "firefox", "test.dart"]);
       expect(result.exitCode, equals(0));
     });
 
@@ -110,7 +116,7 @@ void main() {
   });
 
   group("runs failing tests", () {
-    test("on the browser only", () {
+    test("on Chrome", () {
       new File(p.join(_sandbox, "test.dart")).writeAsStringSync("""
 import 'dart:async';
 
@@ -121,6 +127,20 @@ void main() {
 }
 """);
       var result = _runUnittest(["-p", "chrome", "test.dart"]);
+      expect(result.exitCode, equals(1));
+    });
+
+    test("on Firefox", () {
+      new File(p.join(_sandbox, "test.dart")).writeAsStringSync("""
+import 'dart:async';
+
+import 'package:test/test.dart';
+
+void main() {
+  test("failure", () => throw new TestFailure("oh no"));
+}
+""");
+      var result = _runUnittest(["-p", "firefox", "test.dart"]);
       expect(result.exitCode, equals(1));
     });
 
