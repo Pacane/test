@@ -11,22 +11,23 @@ class TestPlatform {
   // variable tests in test/backend/platform_selector/evaluate_test.
 
   /// The command-line Dart VM.
-  static const vm = const TestPlatform._("VM", "vm", isDartVm: true);
+  static const TestPlatform vm =
+      const TestPlatform._("VM", "vm", isDartVm: true);
 
   /// Dartium.
-  static const dartium = const TestPlatform._("Dartium", "dartium",
+  static const TestPlatform dartium = const TestPlatform._("Dartium", "dartium",
       isBrowser: true isBlink: true);
 
   /// Google Chrome.
-  static const chrome = const TestPlatform._("Chrome", "chrome",
+  static const TestPlatform chrome = const TestPlatform._("Chrome", "chrome",
       isBrowser: true, isJS: true, isBlink: true);
 
   /// Mozilla Firefox.
-  static const firefox = const TestPlatform._("Firefox", "firefox",
+  static const TestPlatform firefox = const TestPlatform._("Firefox", "firefox",
       isBrowser: true, isJS: true);
 
   /// A list of all instances of [TestPlatform].
-  static const all = const [vm, dartium, chrome, firefox];
+  static const List<TestPlatform> all = const [vm, dartium, chrome, firefox];
 
   /// Finds a platform by its identifier string.
   ///
