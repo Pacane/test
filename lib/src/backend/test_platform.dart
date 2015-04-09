@@ -17,8 +17,12 @@ class TestPlatform {
   static const chrome = const TestPlatform._("Chrome", "chrome",
       isBrowser: true, isJS: true, isBlink: true);
 
+  /// Mozilla Firefox.
+  static const firefox = const TestPlatform._("Firefox", "firefox",
+      isBrowser: true, isJS: true);
+
   /// A list of all instances of [TestPlatform].
-  static const all = const [vm, chrome];
+  static const all = const [vm, chrome, firefox];
 
   /// Finds a platform by its identifier string.
   ///

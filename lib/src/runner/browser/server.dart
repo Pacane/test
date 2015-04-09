@@ -16,13 +16,16 @@ import 'package:shelf_static/shelf_static.dart';
 import 'package:shelf_web_socket/shelf_web_socket.dart';
 
 import '../../backend/suite.dart';
+import '../../backend/test_platform.dart';
 import '../../util/io.dart';
 import '../../util/one_off_handler.dart';
 import '../../utils.dart';
 import '../load_exception.dart';
+import 'browser.dart';
 import 'browser_manager.dart';
 import 'compiler_pool.dart';
 import 'chrome.dart';
+import 'firefox.dart';
 
 /// A server that serves JS-compiled tests to browsers.
 ///
@@ -82,50 +85,15 @@ class BrowserServer {
   /// The HTTP client to use when caching JS files in `pub serve`.
   final HttpClient _http;
 
-  /// The browser in which test suites are loaded and run.
-  ///
-  /// This is `null` until a suite is loaded.
-  Chrome _browser;
-
   /// Whether [close] has been called.
   bool get _closed => _closeCompleter != null;
 
   /// The completer for the [Future] returned by [close].
   Completer _closeCompleter;
 
-  /// A future that will complete to the [BrowserManager] for [_browser].
-  ///
-  /// The first time this is called, it will start both the browser and the
-  /// browser manager. Any further calls will return the existing manager.
-  Future<BrowserManager> get _browserManager {
-    if (_browserManagerCompleter == null) {
-      _browserManagerCompleter = new Completer();
-      var path = _webSocketHandler.create(webSocketHandler((webSocket) {
-        _browserManagerCompleter.complete(new BrowserManager(webSocket));
-      }));
+  final _browsers = new Map<TestPlatform, Browser>();
 
-      var webSocketUrl = url.replace(scheme: 'ws', path: '/$path');
-
-      var hostUrl = url;
-      if (_pubServeUrl != null) {
-        hostUrl = _pubServeUrl.resolve(
-            '/packages/test/src/runner/browser/static/');
-      }
-
-      _browser = new Chrome(hostUrl.replace(queryParameters: {
-        'managerUrl': webSocketUrl.toString()
-      }));
-
-      // TODO(nweiz): Gracefully handle the browser being killed before the
-      // tests complete.
-      _browser.onExit.catchError((error, stackTrace) {
-        if (_browserManagerCompleter.isCompleted) return;
-        _browserManagerCompleter.completeError(error, stackTrace);
-      });
-    }
-    return _browserManagerCompleter.future;
-  }
-  Completer<BrowserManager> _browserManagerCompleter;
+  final _browserManagers = new Map<TestPlatform, Future<BrowserManager>>();
 
   BrowserServer._(this._packageRoot, Uri pubServeUrl, bool color)
       : _pubServeUrl = pubServeUrl,
@@ -155,7 +123,7 @@ class BrowserServer {
   /// Loads the test suite at [path].
   ///
   /// This will start a browser to load the suite if one isn't already running.
-  Future<Suite> loadSuite(String path) {
+  Future<Suite> loadSuite(String path, TestPlatform platform) {
     return new Future.sync(() {
       if (_pubServeUrl != null) {
         var suitePrefix = p.withoutExtension(p.relative(path, from: 'test')) +
@@ -178,7 +146,7 @@ class BrowserServer {
       if (_closed) return null;
 
       // TODO(nweiz): Don't start the browser until all the suites are compiled.
-      return _browserManager.then((browserManager) {
+      return _browserManagerFor(platform).then((browserManager) {
         if (_closed) return null;
         return browserManager.loadSuite(path, suiteUrl);
       });
@@ -246,6 +214,48 @@ class BrowserServer {
     });
   }
 
+  Future<BrowserManager> _browserManagerFor(TestPlatform platform) {
+    var manager = _browserManagers[platform];
+    if (manager != null) return manager;
+
+    var completer = new Completer();
+    _browserManagers[platform] = completer.future;
+    var path = _webSocketHandler.create(webSocketHandler((webSocket) {
+      completer.complete(new BrowserManager(webSocket));
+    }));
+
+    var webSocketUrl = url.replace(scheme: 'ws', path: '/$path');
+
+    var hostUrl = url;
+    if (_pubServeUrl != null) {
+      hostUrl = _pubServeUrl.resolve(
+          '/packages/test/src/runner/browser/static/');
+    }
+
+    var browser = _newBrowser(hostUrl.replace(queryParameters: {
+      'managerUrl': webSocketUrl.toString()
+    }), platform);
+    _browsers[platform] = browser;
+
+    // TODO(nweiz): Gracefully handle the browser being killed before the
+    // tests complete.
+    browser.onExit.catchError((error, stackTrace) {
+      if (completer.isCompleted) return;
+      completer.completeError(error, stackTrace);
+    });
+
+    return completer.future;
+  }
+
+  Browser _newBrowser(Uri url, TestPlatform platform) {
+    switch (platform) {
+      case TestPlatform.chrome: return new Chrome(url);
+      case TestPlatform.firefox: return new Firefox(url);
+      default:
+        throw new ArgumentError("$platform is not a browser.");
+    }
+  }
+
   /// Closes the server and releases all its resources.
   ///
   /// Returns a [Future] that completes once the server is closed and its
@@ -258,8 +268,11 @@ class BrowserServer {
       _server.close(),
       _compilers.close()
     ]).then((_) {
-      if (_browserManagerCompleter == null) return null;
-      return _browserManager.then((_) => _browser.close());
+      if (_browserManagers.isEmpty) return null;
+      return Future.wait(_browserManagers.keys.map((platform) {
+        return _browserManagers[platform]
+            .then((_) => _browsers[platform].close());
+      }));
     }).then((_) {
       if (_pubServeUrl == null) {
         new Directory(_compiledDir).deleteSync(recursive: true);
