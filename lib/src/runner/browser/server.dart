@@ -91,8 +91,15 @@ class BrowserServer {
   /// The completer for the [Future] returned by [close].
   Completer _closeCompleter;
 
+  /// All currently-running browsers.
+  ///
+  /// These are controlled by [_browserManager]s.
   final _browsers = new Map<TestPlatform, Browser>();
 
+  /// A map from browser identifiers to futures that will complete to the
+  /// [BrowserManager]s for those browsers.
+  ///
+  /// This should only be accessed through [_browserManagerFor].
   final _browserManagers = new Map<TestPlatform, Future<BrowserManager>>();
 
   BrowserServer._(this._packageRoot, Uri pubServeUrl, bool color)
@@ -120,10 +127,15 @@ class BrowserServer {
     });
   }
 
-  /// Loads the test suite at [path].
+  /// Loads the test suite at [path] on the browser [browser].
   ///
   /// This will start a browser to load the suite if one isn't already running.
-  Future<Suite> loadSuite(String path, TestPlatform platform) {
+  /// Throws an [ArgumentError] if [browser] isn't a browser platform.
+  Future<Suite> loadSuite(String path, TestPlatform browser) {
+    if (!browser.isBrowser) {
+      throw new ArgumentError("$browser is not a browser.");
+    }
+
     return new Future.sync(() {
       if (_pubServeUrl != null) {
         var suitePrefix = p.withoutExtension(p.relative(path, from: 'test')) +
@@ -146,7 +158,7 @@ class BrowserServer {
       if (_closed) return null;
 
       // TODO(nweiz): Don't start the browser until all the suites are compiled.
-      return _browserManagerFor(platform).then((browserManager) {
+      return _browserManagerFor(browser).then((browserManager) {
         if (_closed) return null;
         return browserManager.loadSuite(path, suiteUrl);
       });
@@ -214,6 +226,9 @@ class BrowserServer {
     });
   }
 
+  /// Returns the [BrowserManager] for [platform], which should be a browser.
+  ///
+  /// If no browser manager is running yet, starts one.
   Future<BrowserManager> _browserManagerFor(TestPlatform platform) {
     var manager = _browserManagers[platform];
     if (manager != null) return manager;
@@ -247,12 +262,13 @@ class BrowserServer {
     return completer.future;
   }
 
-  Browser _newBrowser(Uri url, TestPlatform platform) {
-    switch (platform) {
+  /// Starts the browser identified by [browser] and has it load [url].
+  Browser _newBrowser(Uri url, TestPlatform browser) {
+    switch (browser) {
       case TestPlatform.chrome: return new Chrome(url);
       case TestPlatform.firefox: return new Firefox(url);
       default:
-        throw new ArgumentError("$platform is not a browser.");
+        throw new ArgumentError("$browser is not a browser.");
     }
   }
 

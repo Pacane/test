@@ -31,10 +31,6 @@ class Chrome implements Browser {
   /// well-isolated.
   String _dir;
 
-  /// A future that completes when the browser exits.
-  ///
-  /// If there's a problem starting or running the browser, this will complete
-  /// with an error.
   Future get onExit => _onExitCompleter.future;
   final _onExitCompleter = new Completer();
 
@@ -81,10 +77,6 @@ class Chrome implements Browser {
         .catchError(_onExitCompleter.completeError);
   }
 
-  /// Kills the browser process.
-  ///
-  /// Returns the same [Future] as [onExit], except that it won't emit
-  /// exceptions.
   Future close() {
     _onProcessStarted.then((_) => _process.kill());
 
