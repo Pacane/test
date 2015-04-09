@@ -61,7 +61,8 @@ class Firefox implements Browser {
       new File(p.join(dir, 'prefs.js')).writeAsStringSync(_preferences);
 
       return Process.start(executable, [
-        "--profile=$_dir",
+        "--profile",
+        "$_dir",
         url.toString(),
         "--no-remote"
       ]).then((process) {
