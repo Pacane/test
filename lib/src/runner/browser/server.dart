@@ -265,6 +265,7 @@ class BrowserServer {
   /// Starts the browser identified by [browser] and has it load [url].
   Browser _newBrowser(Uri url, TestPlatform browser) {
     switch (browser) {
+      case TestPlatform.dartium: return new Dartium(url);
       case TestPlatform.chrome: return new Chrome(url);
       case TestPlatform.firefox: return new Firefox(url);
       default:

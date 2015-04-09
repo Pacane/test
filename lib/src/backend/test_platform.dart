@@ -13,6 +13,10 @@ class TestPlatform {
   /// The command-line Dart VM.
   static const vm = const TestPlatform._("VM", "vm", isDartVm: true);
 
+  /// Dartium.
+  static const dartium = const TestPlatform._("Dartium", "dartium",
+      isBrowser: true isBlink: true);
+
   /// Google Chrome.
   static const chrome = const TestPlatform._("Chrome", "chrome",
       isBrowser: true, isJS: true, isBlink: true);
@@ -22,7 +26,7 @@ class TestPlatform {
       isBrowser: true, isJS: true);
 
   /// A list of all instances of [TestPlatform].
-  static const all = const [vm, chrome, firefox];
+  static const all = const [vm, dartium, chrome, firefox];
 
   /// Finds a platform by its identifier string.
   ///
