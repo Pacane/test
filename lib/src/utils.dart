@@ -5,7 +5,9 @@
 library test.utils;
 
 import 'dart:async';
+import 'dart:math' as math;
 
+import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 import 'package:stack_trace/stack_trace.dart';
 
@@ -178,4 +180,15 @@ Stream mergeStreams(Iterable<Stream> streamIter) {
   });
 
   return controller.stream;
+}
+
+String randomBase64(int bytes, {int seed, bool urlSafe: false,
+    bool addLineSeparator: false}) {
+  var random = new math.Random(seed);
+  var data = [];
+  for (var i = 0; i < bytes; i++) {
+    data.add(random.nextInt(256));
+  }
+  return CryptoUtils.bytesToBase64(data,
+      urlSafe: urlSafe, addLineSeparator: addLineSeparator);
 }

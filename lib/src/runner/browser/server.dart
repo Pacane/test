@@ -18,6 +18,8 @@ import 'package:shelf_web_socket/shelf_web_socket.dart';
 import '../../backend/suite.dart';
 import '../../backend/test_platform.dart';
 import '../../util/io.dart';
+import '../../util/nesting_middleware.dart';
+import '../../util/path_handler.dart';
 import '../../util/one_off_handler.dart';
 import '../../utils.dart';
 import '../load_exception.dart';
@@ -25,6 +27,7 @@ import 'browser.dart';
 import 'browser_manager.dart';
 import 'compiler_pool.dart';
 import 'chrome.dart';
+import 'dartium.dart';
 import 'firefox.dart';
 
 /// A server that serves JS-compiled tests to browsers.
@@ -50,8 +53,11 @@ class BrowserServer {
   /// The underlying HTTP server.
   HttpServer _server;
 
+  final _secret = randomBase64(24, urlSafe: true);
+
   /// The URL for this server.
-  Uri get url => baseUrlForAddress(_server.address, _server.port);
+  Uri get url => baseUrlForAddress(_server.address, _server.port)
+      .resolve(_secret + "/");
 
   /// a [OneOffHandler] for servicing WebSocket connections for
   /// [BrowserManager]s.
@@ -59,6 +65,8 @@ class BrowserServer {
   /// This is one-off because each [BrowserManager] can only connect to a single
   /// WebSocket,
   final _webSocketHandler = new OneOffHandler();
+
+  final _pathHandler = new PathHandler();
 
   /// The [CompilerPool] managing active instances of `dart2js`.
   ///
@@ -114,17 +122,37 @@ class BrowserServer {
         .add(_webSocketHandler.handler);
 
     if (_pubServeUrl == null) {
-      var staticPath = p.join(libDir(packageRoot: _packageRoot),
-          'src/runner/browser/static');
       cascade = cascade
-          .add(createStaticHandler(staticPath, defaultDocument: 'index.html'))
-          .add(createStaticHandler(_compiledDir,
-              defaultDocument: 'index.html'));
+          .add(_packagesHandler())
+          .add(_pathHandler.handler)
+          .add(createStaticHandler(p.current));
     }
 
-    return shelf_io.serve(cascade.handler, 'localhost', 0).then((server) {
+    var pipeline = new shelf.Pipeline()
+      .addMiddleware(nestingMiddleware(_secret))
+      .addHandler(cascade.handler);
+
+    return shelf_io.serve(pipeline, 'localhost', 0).then((server) {
       _server = server;
     });
+  }
+
+  shelf.Handler _packagesHandler() {
+    var packageRoot = _packageRoot == null ? 'packages' : _packageRoot;
+    var staticHandler =
+      createStaticHandler(packageRoot, serveFilesOutsidePath: true);
+
+    return (request) {
+      var segments = p.url.split(request.url.path);
+
+      for (var i = 0; i < segments.length; i++) {
+        if (segments[i] != "packages") continue;
+        return staticHandler(
+            request.change(path: p.url.joinAll(segments.take(i + 1))));
+      }
+
+      return new shelf.Response.notFound("Not found.");
+    };
   }
 
   /// Loads the test suite at [path] on the browser [browser].
@@ -144,14 +172,9 @@ class BrowserServer {
         return _pubServeSuite(path, jsUrl)
             .then((_) => _pubServeUrl.resolve('$suitePrefix.html'));
       } else {
-        return _compileSuite(path).then((dir) {
+        return _compileSuite(path, browser).then((dir) {
           if (_closed) return null;
-
-          // Add a trailing slash because at least on Chrome, the iframe's
-          // window.location.href will do so automatically, and if that differs
-          // from the original URL communication will fail.
-          return url.resolve(
-              "/" + p.toUri(p.relative(dir, from: _compiledDir)).path + "/");
+          return url.resolveUri(p.toUri(p.relative(path) + ".html"));
         });
       }
     }).then((suiteUrl) {
@@ -204,24 +227,47 @@ class BrowserServer {
   /// Compile the test suite at [dartPath] to JavaScript.
   ///
   /// Returns a [Future] that completes to the path to the JavaScript.
-  Future<String> _compileSuite(String dartPath) {
+  Future<String> _compileSuite(String dartPath, TestPlatform browser) {
     var dir = new Directory(_compiledDir).createTempSync('test_').path;
-    var jsPath = p.join(dir, p.basename(dartPath) + ".js");
-    return _compilers.compile(dartPath, jsPath,
-            packageRoot: packageRootFor(dartPath, _packageRoot))
-        .then((_) {
+    var prefix = p.join(dir, p.basename(dartPath));
+    var wrapperPath = p.withoutExtension(prefix) + ".browser_test.dart";
+
+    return new Future.sync(() {
+      if (browser.isJS) {
+        return _compilers.compile(dartPath, "$prefix.js",
+            packageRoot: packageRootFor(dartPath, _packageRoot));
+      }
+
+      new File(wrapperPath).writeAsStringSync('''
+import "package:test/src/runner/browser/iframe_listener.dart";
+
+import "${p.basename(dartPath)}" as test;
+
+void main() {
+  IframeListener.start(() => test.main);
+}
+''');
+      return null;
+    }).then((_) {
       if (_closed) return null;
 
       // TODO(nweiz): support user-authored HTML files.
-      new File(p.join(dir, "index.html")).writeAsStringSync('''
+      new File("$prefix.html").writeAsStringSync('''
 <!DOCTYPE html>
 <html>
 <head>
   <title>${HTML_ESCAPE.convert(dartPath)} Test</title>
-  <script src="${HTML_ESCAPE.convert(p.basename(jsPath))}"></script>
+  <script type="application/dart"
+          src="${HTML_ESCAPE.convert(p.basename(wrapperPath))}">
+  </script>
+  <script src="${HTML_ESCAPE.convert(p.basename(dartPath))}.js"></script>
 </head>
 </html>
 ''');
+
+      _pathHandler.add(p.dirname(p.relative(dartPath)),
+          createStaticHandler(dir));
+
       return dir;
     });
   }
@@ -239,13 +285,10 @@ class BrowserServer {
       completer.complete(new BrowserManager(webSocket));
     }));
 
-    var webSocketUrl = url.replace(scheme: 'ws', path: '/$path');
+    var webSocketUrl = url.replace(scheme: 'ws').resolve(path);
 
-    var hostUrl = url;
-    if (_pubServeUrl != null) {
-      hostUrl = _pubServeUrl.resolve(
-          '/packages/test/src/runner/browser/static/');
-    }
+    var hostUrl = (_pubServeUrl == null ? url : _pubServeUrl)
+        .resolve('packages/test/src/runner/browser/static/index.html');
 
     var browser = _newBrowser(hostUrl.replace(queryParameters: {
       'managerUrl': webSocketUrl.toString()

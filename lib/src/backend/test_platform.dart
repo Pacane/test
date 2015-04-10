@@ -16,7 +16,7 @@ class TestPlatform {
 
   /// Dartium.
   static const TestPlatform dartium = const TestPlatform._("Dartium", "dartium",
-      isBrowser: true isBlink: true);
+      isBrowser: true, isBlink: true);
 
   /// Google Chrome.
   static const TestPlatform chrome = const TestPlatform._("Chrome", "chrome",

@@ -85,7 +85,8 @@ class Dartium implements Browser {
   /// Return the default executable for the current operating system.
   String _defaultExecutable() {
     var dartium = _executableInEditor();
-    if (dartium == null) return Platform.isWindows ? "dartium.exe" : "dartium";
+    if (dartium != null) return dartium;
+    return Platform.isWindows ? "dartium.exe" : "dartium";
   }
 
   String _executableInEditor() {
